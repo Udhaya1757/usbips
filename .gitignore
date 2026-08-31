@@ -11,6 +11,8 @@ x86/
 *.ilk
 *.pdb
 *.obj
+*.o
+*.exe
 *.tlog
 *.log
 *.idb
