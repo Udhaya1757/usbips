@@ -34,6 +34,7 @@
 #include "../classifier/DeviceClassifier.h"
 #include "../database/LocalDatabase.h"
 #include "../access/AccessController.h"
+#include "../logging/EventLogger.h"
 
 #include <iostream>
 #include <iomanip>
@@ -84,14 +85,13 @@ static BOOL WINAPI ConsoleCtrlHandler(DWORD ctrlType)
 }
 
 // ── Constructor ───────────────────────────────────────────────────────────────
-USBMonitor::USBMonitor(LocalDatabase* db, AccessController* accessCtrl)
+USBMonitor::USBMonitor(LocalDatabase* db, AccessController* accessCtrl, EventLogger* logger)
     : m_hwnd(nullptr)
     , m_running(false)
     , m_pDb(db)
     , m_pAccessController(accessCtrl)
+    , m_pLogger(logger)
 {
-    // Zero-initialise all three HDEVNOTIFY handles so we can safely check
-    // them in UnregisterDeviceNotifications() without undefined behaviour.
     m_notifyHandles.fill(nullptr);
 }
 
@@ -544,17 +544,30 @@ LRESULT USBMonitor::HandleDeviceChange(WPARAM wParam, LPARAM lParam)
                 std::wcout.flush();
                 std::wstring answer;
                 std::wcin >> answer;
-                if (!answer.empty() && (answer[0] == L'y' || answer[0] == L'Y')) {
-                    m_pAccessController->HandleUserDecision(device, true);
-                    std::wcout << L"[ACCESS CONTROLLER] USER_APPROVED — Added to allowlist. Device is ALLOWED.\n\n";
-                } else {
-                    m_pAccessController->HandleUserDecision(device, false);
-                    std::wcout << L"[ACCESS CONTROLLER] USER_REJECTED — Device is BLOCKED.\n\n";
+                bool approved = (!answer.empty() && (answer[0] == L'y' || answer[0] == L'Y'));
+                DecisionResult userResult = m_pAccessController->HandleUserDecision(device, approved);
+                std::wcout << (approved
+                    ? L"[ACCESS CONTROLLER] USER_APPROVED — Device is ALLOWED.\n\n"
+                    : L"[ACCESS CONTROLLER] USER_REJECTED — Device is BLOCKED.\n\n");
+                // Phase 1F: Log user decision event
+                if (m_pLogger) {
+                    SecurityEvent ev = m_pLogger->BuildEvent(
+                        approved ? EventType::USER_APPROVED : EventType::USER_REJECTED,
+                        device, AccessDecisionToString(userResult.decision), userResult.reason);
+                    m_pLogger->Log(ev);
                 }
-            } else if (result.decision == AccessDecision::ALLOW) {
-                std::wcout << L"[ACCESS CONTROLLER] Device is ALLOWED and active.\n\n";
             } else {
-                std::wcout << L"[ACCESS CONTROLLER] Device is BLOCKED.\n\n";
+                std::wcout << (result.decision == AccessDecision::ALLOW
+                    ? L"[ACCESS CONTROLLER] Device is ALLOWED and active.\n\n"
+                    : L"[ACCESS CONTROLLER] Device is BLOCKED.\n\n");
+                // Phase 1F: Log allow/block event
+                if (m_pLogger) {
+                    SecurityEvent ev = m_pLogger->BuildEvent(
+                        result.decision == AccessDecision::ALLOW
+                            ? EventType::ALLOWLIST_MATCH : EventType::DEVICE_BLOCKED,
+                        device, AccessDecisionToString(result.decision), result.reason);
+                    m_pLogger->Log(ev);
+                }
             }
         } else if (m_pDb) {
             bool allowed = m_pDb->IsDeviceAllowed(device);
@@ -566,6 +579,12 @@ LRESULT USBMonitor::HandleDeviceChange(WPARAM wParam, LPARAM lParam)
                             allowed ? "Allowlist match" : "Unknown device");
         } else {
             std::wcout << L"\n";
+        }
+        // Phase 1F: Log connect event
+        if (m_pLogger) {
+            SecurityEvent ev = m_pLogger->BuildEvent(
+                EventType::DEVICE_CONNECTED, device, "-", "device_arrival");
+            m_pLogger->Log(ev);
         }
     }
     // ── DBT_DEVICEREMOVECOMPLETE ─────────────────────────────────────────
@@ -597,6 +616,13 @@ LRESULT USBMonitor::HandleDeviceChange(WPARAM wParam, LPARAM lParam)
             dev.pid = pid;
             dev.serialNumber = serial;
             m_pDb->LogEvent("DISCONNECTED", dev, "INFO", "Device removed");
+        }
+        // Phase 1F: Log removal event
+        if (m_pLogger) {
+            USBDevice dev;
+            dev.vid = vid; dev.pid = pid; dev.serialNumber = serial;
+            SecurityEvent ev = m_pLogger->BuildEvent(EventType::DEVICE_REMOVED, dev, "-", "device_removal");
+            m_pLogger->Log(ev);
         }
     }
 

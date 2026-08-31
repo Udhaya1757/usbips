@@ -28,6 +28,7 @@
 #include "usb/USBMonitor.h"
 #include "database/LocalDatabase.h"
 #include "access/AccessController.h"
+#include "logging/EventLogger.h"
 
 int main()
 {
@@ -50,11 +51,20 @@ int main()
         std::wcout << L"[main] Local SQLite database initialized: usbips_local.db\n\n";
     }
 
-    // ── Initialize Access Controller Engine ────────────────────────────────
+    // ── Initialize Access Controller Engine ────────────────────────────────────────
     AccessController accessController(&db);
 
-    // ── Create the USBMonitor instance ────────────────────────────────────
-    USBMonitor monitor(&db, &accessController);
+    // ── Initialize Event Logger ────────────────────────────────────────────────
+    EventLogger eventLogger;
+    if (!eventLogger.Initialize(&db, "usbips_events.log")) {
+        std::wcout << L"[main] WARNING: Failed to initialize event logger.\n";
+    } else {
+        std::wcout << L"[main] Event logger initialized: usbips_events.log\n";
+        std::wcout << L"[main] Client ID: " << LocalDatabase::ToWide(eventLogger.GetClientId()) << L"\n\n";
+    }
+
+    // ── Create the USBMonitor instance ────────────────────────────────────────
+    USBMonitor monitor(&db, &accessController, &eventLogger);
 
     // ── Start monitoring ──────────────────────────────────────────────────
     //

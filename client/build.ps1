@@ -33,6 +33,7 @@ $sources = @(
     (Join-Path $srcDir "classifier/DeviceClassifier.cpp"),
     (Join-Path $srcDir "database/LocalDatabase.cpp"),
     (Join-Path $srcDir "access/AccessController.cpp"),
+    (Join-Path $srcDir "logging/EventLogger.cpp"),
     "`"$sqliteObj`""
 )
 
