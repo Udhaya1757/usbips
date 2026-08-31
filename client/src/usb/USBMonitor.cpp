@@ -32,6 +32,7 @@
 #include "USBMonitor.h"
 #include "../device/DeviceInfoExtractor.h"
 #include "../classifier/DeviceClassifier.h"
+#include "../database/LocalDatabase.h"
 
 #include <iostream>
 #include <iomanip>
@@ -82,9 +83,10 @@ static BOOL WINAPI ConsoleCtrlHandler(DWORD ctrlType)
 }
 
 // ── Constructor ───────────────────────────────────────────────────────────────
-USBMonitor::USBMonitor()
+USBMonitor::USBMonitor(LocalDatabase* db)
     : m_hwnd(nullptr)
     , m_running(false)
+    , m_pDb(db)
 {
     // Zero-initialise all three HDEVNOTIFY handles so we can safely check
     // them in UnregisterDeviceNotifications() without undefined behaviour.
@@ -527,9 +529,23 @@ LRESULT USBMonitor::HandleDeviceChange(WPARAM wParam, LPARAM lParam)
 
         device.PrintSummary();
         std::wcout << L"[CLASSIFIER] Device type: " << classification.typeString
-                   << L" (rule: " << classification.ruleName << L")\n\n";
+                   << L" (rule: " << classification.ruleName << L")\n";
 
-        // TODO (Phase 1E): Pass device to AccessController (Allowlist check / Enforce policy)
+        // Phase 1D: Local Database Allowlist check & Event Logging
+        if (m_pDb) {
+            bool allowed = m_pDb->IsDeviceAllowed(device);
+            std::wcout << L"[DATABASE] Allowlist Status: "
+                       << (allowed ? L"ALLOWED (Trusted Device)" : L"BLOCKED / UNKNOWN (Not in Allowlist)")
+                       << L"\n\n";
+
+            m_pDb->LogEvent("CONNECTED", device,
+                            allowed ? "ALLOW" : "BLOCK",
+                            allowed ? "Allowlist match" : "Unknown device");
+        } else {
+            std::wcout << L"\n";
+        }
+
+        // TODO (Phase 1E): Pass device to AccessController (Policy enforcement / Popups)
     }
     // ── DBT_DEVICEREMOVECOMPLETE ─────────────────────────────────────────
     else if (wParam == DBT_DEVICEREMOVECOMPLETE)
@@ -551,9 +567,16 @@ LRESULT USBMonitor::HandleDeviceChange(WPARAM wParam, LPARAM lParam)
         }
         std::wcout
             << L"  Device Interface: " << devicePath << L"\n"
-            << L"========================================\n";
+            << L"========================================\n\n";
 
-        // TODO (Phase 1F): Log disconnection event via Logger module
+        if (m_pDb) {
+            USBDevice dev;
+            dev.devicePath = devicePath;
+            dev.vid = vid;
+            dev.pid = pid;
+            dev.serialNumber = serial;
+            m_pDb->LogEvent("DISCONNECTED", dev, "INFO", "Device removed");
+        }
     }
 
     return TRUE;

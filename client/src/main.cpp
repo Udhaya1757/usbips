@@ -26,35 +26,32 @@
 #include <fcntl.h>     // _O_U16TEXT
 
 #include "usb/USBMonitor.h"
+#include "database/LocalDatabase.h"
 
 int main()
 {
     // ── Configure console for wide-character (UTF-16) output ─────────────
-    //
-    // By default, Windows console streams are in narrow-char ANSI mode.
-    // Device interface paths returned by WM_DEVICECHANGE are wide strings
-    // (wchar_t / WCHAR) and may contain non-ASCII characters.
-    //
-    // _setmode(_fileno(stdout), _O_U16TEXT) switches stdout to UTF-16LE
-    // mode so that std::wcout outputs wide strings correctly.
-    // Without this, every std::wcout call may produce garbled or empty output.
-    //
-    // Note: After _O_U16TEXT, do NOT mix narrow std::cout with std::wcout
-    // on the same stream — it will assert in debug builds.
     _setmode(_fileno(stdout), _O_U16TEXT);
     _setmode(_fileno(stderr), _O_U16TEXT);
 
     std::wcout
         << L"============================================================\n"
         << L"  USBIPS — USB Intrusion Prevention System\n"
-        << L"  Client v0.1 — Phase 1A: USB Device Monitor\n"
+        << L"  Client v0.1 — Phase 1: USB Monitor & Local Allowlist\n"
         << L"============================================================\n\n";
 
+    // ── Initialize Local SQLite Database ──────────────────────────────────
+    LocalDatabase db;
+    if (!db.Initialize("usbips_local.db")) {
+        std::wcout << L"[main] WARNING: Failed to initialize local SQLite database.\n"
+                   << L"       Allowlist matching and local event logging will be disabled.\n\n";
+    } else {
+        std::wcout << L"[main] Local SQLite database initialized: usbips_local.db\n\n";
+    }
+
     // ── Create the USBMonitor instance ────────────────────────────────────
-    //
-    // USBMonitor is a RAII object.  Its constructor is lightweight (no Win32
-    // calls yet).  All initialization happens inside Start().
-    USBMonitor monitor;
+    // Pass pointer to LocalDatabase for allowlist lookup and event auditing
+    USBMonitor monitor(&db);
 
     // ── Start monitoring ──────────────────────────────────────────────────
     //
