@@ -27,6 +27,7 @@
 
 #include "usb/USBMonitor.h"
 #include "database/LocalDatabase.h"
+#include "access/AccessController.h"
 
 int main()
 {
@@ -37,7 +38,7 @@ int main()
     std::wcout
         << L"============================================================\n"
         << L"  USBIPS — USB Intrusion Prevention System\n"
-        << L"  Client v0.1 — Phase 1: USB Monitor & Local Allowlist\n"
+        << L"  Client v0.1 — Phase 1: USB Monitor & Access Controller\n"
         << L"============================================================\n\n";
 
     // ── Initialize Local SQLite Database ──────────────────────────────────
@@ -49,9 +50,11 @@ int main()
         std::wcout << L"[main] Local SQLite database initialized: usbips_local.db\n\n";
     }
 
+    // ── Initialize Access Controller Engine ────────────────────────────────
+    AccessController accessController(&db);
+
     // ── Create the USBMonitor instance ────────────────────────────────────
-    // Pass pointer to LocalDatabase for allowlist lookup and event auditing
-    USBMonitor monitor(&db);
+    USBMonitor monitor(&db, &accessController);
 
     // ── Start monitoring ──────────────────────────────────────────────────
     //

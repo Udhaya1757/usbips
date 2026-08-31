@@ -70,6 +70,7 @@ static const GUID GUID_DEVINTERFACE_VOLUME = {
 };
 
 class LocalDatabase;
+class AccessController;
 
 // ── USBMonitor Class ──────────────────────────────────────────────────────────
 
@@ -78,10 +79,11 @@ public:
     // ------------------------------------------------------------------
     // Constructor / Destructor
     // ------------------------------------------------------------------
-    explicit USBMonitor(LocalDatabase* db = nullptr);
+    explicit USBMonitor(LocalDatabase* db = nullptr, AccessController* accessCtrl = nullptr);
     ~USBMonitor();
 
     void SetDatabase(LocalDatabase* db) { m_pDb = db; }
+    void SetAccessController(AccessController* accessCtrl) { m_pAccessController = accessCtrl; }
 
     // ------------------------------------------------------------------
     // Start()
@@ -146,5 +148,6 @@ private:
     // Name of the window class we register; kept so we can unregister it.
     static constexpr wchar_t kWindowClassName[] = L"USBIPS_Monitor_WndClass";
 
-    LocalDatabase* m_pDb;       // Pointer to local database instance (optional)
+    LocalDatabase* m_pDb;                 // Pointer to local database instance (optional)
+    AccessController* m_pAccessController; // Pointer to access controller instance (optional)
 };

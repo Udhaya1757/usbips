@@ -33,6 +33,7 @@
 #include "../device/DeviceInfoExtractor.h"
 #include "../classifier/DeviceClassifier.h"
 #include "../database/LocalDatabase.h"
+#include "../access/AccessController.h"
 
 #include <iostream>
 #include <iomanip>
@@ -83,10 +84,11 @@ static BOOL WINAPI ConsoleCtrlHandler(DWORD ctrlType)
 }
 
 // ── Constructor ───────────────────────────────────────────────────────────────
-USBMonitor::USBMonitor(LocalDatabase* db)
+USBMonitor::USBMonitor(LocalDatabase* db, AccessController* accessCtrl)
     : m_hwnd(nullptr)
     , m_running(false)
     , m_pDb(db)
+    , m_pAccessController(accessCtrl)
 {
     // Zero-initialise all three HDEVNOTIFY handles so we can safely check
     // them in UnregisterDeviceNotifications() without undefined behaviour.
@@ -531,21 +533,40 @@ LRESULT USBMonitor::HandleDeviceChange(WPARAM wParam, LPARAM lParam)
         std::wcout << L"[CLASSIFIER] Device type: " << classification.typeString
                    << L" (rule: " << classification.ruleName << L")\n";
 
-        // Phase 1D: Local Database Allowlist check & Event Logging
-        if (m_pDb) {
+        // Phase 1E: Access Controller Evaluation & Policy Enforcement
+        if (m_pAccessController) {
+            DecisionResult result = m_pAccessController->EvaluateDevice(device);
+            std::wcout << L"[ACCESS CONTROLLER] Decision: " << AccessDecisionToWString(result.decision)
+                       << L" — Reason: " << LocalDatabase::ToWide(result.reason) << L"\n";
+
+            if (result.decision == AccessDecision::ASK) {
+                std::wcout << L"[ACTION REQUIRED] Allow this device? (y/n): ";
+                std::wcout.flush();
+                std::wstring answer;
+                std::wcin >> answer;
+                if (!answer.empty() && (answer[0] == L'y' || answer[0] == L'Y')) {
+                    m_pAccessController->HandleUserDecision(device, true);
+                    std::wcout << L"[ACCESS CONTROLLER] USER_APPROVED — Added to allowlist. Device is ALLOWED.\n\n";
+                } else {
+                    m_pAccessController->HandleUserDecision(device, false);
+                    std::wcout << L"[ACCESS CONTROLLER] USER_REJECTED — Device is BLOCKED.\n\n";
+                }
+            } else if (result.decision == AccessDecision::ALLOW) {
+                std::wcout << L"[ACCESS CONTROLLER] Device is ALLOWED and active.\n\n";
+            } else {
+                std::wcout << L"[ACCESS CONTROLLER] Device is BLOCKED.\n\n";
+            }
+        } else if (m_pDb) {
             bool allowed = m_pDb->IsDeviceAllowed(device);
             std::wcout << L"[DATABASE] Allowlist Status: "
                        << (allowed ? L"ALLOWED (Trusted Device)" : L"BLOCKED / UNKNOWN (Not in Allowlist)")
                        << L"\n\n";
-
             m_pDb->LogEvent("CONNECTED", device,
                             allowed ? "ALLOW" : "BLOCK",
                             allowed ? "Allowlist match" : "Unknown device");
         } else {
             std::wcout << L"\n";
         }
-
-        // TODO (Phase 1E): Pass device to AccessController (Policy enforcement / Popups)
     }
     // ── DBT_DEVICEREMOVECOMPLETE ─────────────────────────────────────────
     else if (wParam == DBT_DEVICEREMOVECOMPLETE)
