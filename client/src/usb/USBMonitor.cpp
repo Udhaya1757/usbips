@@ -31,6 +31,7 @@
 
 #include "USBMonitor.h"
 #include "../device/DeviceInfoExtractor.h"
+#include "../classifier/DeviceClassifier.h"
 
 #include <iostream>
 #include <iomanip>
@@ -520,9 +521,14 @@ LRESULT USBMonitor::HandleDeviceChange(WPARAM wParam, LPARAM lParam)
 
         // Phase 1B: Extract rich device identity using SetupAPI, CfgMgr32 & Volume APIs
         USBDevice device = DeviceInfoExtractor::Extract(devicePath);
-        device.PrintSummary();
 
-        // TODO (Phase 1C): Pass device to DeviceClassifier
+        // Phase 1C: Classify device category using layered heuristics
+        ClassificationResult classification = DeviceClassifier::Classify(device);
+
+        device.PrintSummary();
+        std::wcout << L"[CLASSIFIER] Device type: " << classification.typeString
+                   << L" (rule: " << classification.ruleName << L")\n\n";
+
         // TODO (Phase 1E): Pass device to AccessController (Allowlist check / Enforce policy)
     }
     // ── DBT_DEVICEREMOVECOMPLETE ─────────────────────────────────────────

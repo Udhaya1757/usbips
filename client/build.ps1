@@ -15,7 +15,8 @@ Write-Host "============================================================" -Foreg
 $sources = @(
     (Join-Path $srcDir "main.cpp"),
     (Join-Path $srcDir "usb/USBMonitor.cpp"),
-    (Join-Path $srcDir "device/DeviceInfoExtractor.cpp")
+    (Join-Path $srcDir "device/DeviceInfoExtractor.cpp"),
+    (Join-Path $srcDir "classifier/DeviceClassifier.cpp")
 )
 
 $libs = @(
