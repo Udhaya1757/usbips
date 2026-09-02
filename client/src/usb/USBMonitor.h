@@ -30,8 +30,13 @@
 #include <Windows.h>            // Core Win32 types: HWND, HANDLE, DWORD, BOOL, …
 #include <Dbt.h>                // Device-Broadcast Structures: DEV_BROADCAST_DEVICEINTERFACE,
                                 //   WM_DEVICECHANGE, DBT_DEVICEARRIVAL, DBT_DEVICEREMOVECOMPLETE
+#include <atomic>
 #include <string>               // std::wstring for Unicode device paths
 #include <array>                // std::array for the three notification handles
+#include <condition_variable>
+#include <deque>
+#include <mutex>
+#include <thread>
 
 // ── GUIDs for the three device interface classes we monitor ──────────────────
 //
@@ -136,12 +141,23 @@ private:
     bool RegisterDeviceNotifications(); // Calls RegisterDeviceNotificationW() for each GUID
     void UnregisterDeviceNotifications(); // Cleanup: calls UnregisterDeviceNotification()
     void DestroyMessageWindow();         // DestroyWindow() + UnregisterClassW()
+    void EnqueueDeviceEvent(bool arrival, const std::wstring& devicePath);
+    void ProcessDeviceEvents();
+    void ProcessDeviceArrival(const std::wstring& devicePath);
+    void ProcessDeviceRemoval(const std::wstring& devicePath);
+    void StopDeviceProcessing();
+
+    struct PendingDeviceEvent {
+        bool arrival;
+        std::wstring devicePath;
+    };
 
     // ------------------------------------------------------------------
     // Member variables
     // ------------------------------------------------------------------
     HWND   m_hwnd;      // Handle to our hidden message-only window
     bool   m_running;   // True while the message loop is executing
+    std::atomic<DWORD> m_messageThreadId{0};
 
     // Three notification handles — one per GUID.
     // We keep them so we can call UnregisterDeviceNotification() on exit.
@@ -153,4 +169,9 @@ private:
     LocalDatabase*    m_pDb;                 // Pointer to local database instance
     AccessController* m_pAccessController;   // Pointer to access controller instance
     EventLogger*      m_pLogger;             // Pointer to event logger instance
+        std::deque<PendingDeviceEvent> m_pendingEvents;
+        std::mutex m_pendingEventsMutex;
+        std::condition_variable m_pendingEventsCondition;
+        bool m_processEvents = false;
+        std::thread m_processingThread;
 };

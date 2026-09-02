@@ -129,6 +129,8 @@ bool USBMonitor::Start()
     if (!CreateMessageWindow())
         return false;
 
+    m_messageThreadId.store(::GetCurrentThreadId(), std::memory_order_release);
+
     // ── Subscribe to device-interface notifications ──────────────────────
     if (!RegisterDeviceNotifications())
     {
@@ -144,6 +146,8 @@ bool USBMonitor::Start()
         << L"========================================\n\n";
 
     m_running = true;
+    m_processEvents = true;
+    m_processingThread = std::thread(&USBMonitor::ProcessDeviceEvents, this);
 
     // ── Win32 Message Loop ────────────────────────────────────────────────
     //
@@ -177,6 +181,7 @@ bool USBMonitor::Start()
     }
 
     m_running = false;
+    StopDeviceProcessing();
 
     // ── Cleanup ───────────────────────────────────────────────────────────
     UnregisterDeviceNotifications();
@@ -185,6 +190,7 @@ bool USBMonitor::Start()
     // Deregister our Ctrl+C handler (second param FALSE = remove).
     ::SetConsoleCtrlHandler(ConsoleCtrlHandler, FALSE);
     g_pMonitor = nullptr;
+    m_messageThreadId.store(0, std::memory_order_release);
 
     std::wcout << L"\n[USBMonitor] Stopped cleanly.\n";
     return true;
@@ -197,15 +203,16 @@ bool USBMonitor::Start()
 // ============================================================
 void USBMonitor::Stop()
 {
-    if (m_hwnd)
-    {
-        // PostQuitMessage(0) places WM_QUIT into the queue of the thread
-        // that *created* m_hwnd.  This causes GetMessage() to return 0.
-        //
-        // Why not SendMessage()?  SendMessage() blocks until WndProc returns.
-        // PostQuitMessage() is asynchronous and safe from any thread.
+    const DWORD messageThreadId = m_messageThreadId.load(std::memory_order_acquire);
+    if (messageThreadId == 0)
+        return;
+
+    if (messageThreadId == ::GetCurrentThreadId()) {
         ::PostQuitMessage(0);
+        return;
     }
+
+    ::PostThreadMessageW(messageThreadId, WM_QUIT, 0, 0);
 }
 
 // ============================================================
@@ -518,6 +525,68 @@ LRESULT USBMonitor::HandleDeviceChange(WPARAM wParam, LPARAM lParam)
     // ── DBT_DEVICEARRIVAL ────────────────────────────────────────────────
     if (wParam == DBT_DEVICEARRIVAL)
     {
+        EnqueueDeviceEvent(true, devicePath);
+    }
+    // ── DBT_DEVICEREMOVECOMPLETE ─────────────────────────────────────────
+    else if (wParam == DBT_DEVICEREMOVECOMPLETE)
+    {
+        EnqueueDeviceEvent(false, devicePath);
+    }
+
+    return TRUE;
+}
+
+void USBMonitor::EnqueueDeviceEvent(bool arrival, const std::wstring& devicePath)
+{
+    std::lock_guard<std::mutex> lock(m_pendingEventsMutex);
+    if (!m_processEvents)
+        return;
+
+    m_pendingEvents.push_back({ arrival, devicePath });
+    m_pendingEventsCondition.notify_one();
+}
+
+void USBMonitor::ProcessDeviceEvents()
+{
+    while (true)
+    {
+        PendingDeviceEvent event{};
+        {
+            std::unique_lock<std::mutex> lock(m_pendingEventsMutex);
+            m_pendingEventsCondition.wait(lock, [this] {
+                return !m_processEvents || !m_pendingEvents.empty();
+            });
+
+            if (m_pendingEvents.empty()) {
+                if (!m_processEvents)
+                    return;
+                continue;
+            }
+
+            event = std::move(m_pendingEvents.front());
+            m_pendingEvents.pop_front();
+        }
+
+        if (event.arrival)
+            ProcessDeviceArrival(event.devicePath);
+        else
+            ProcessDeviceRemoval(event.devicePath);
+    }
+}
+
+void USBMonitor::StopDeviceProcessing()
+{
+    {
+        std::lock_guard<std::mutex> lock(m_pendingEventsMutex);
+        m_processEvents = false;
+    }
+    m_pendingEventsCondition.notify_one();
+    if (m_processingThread.joinable())
+        m_processingThread.join();
+}
+
+void USBMonitor::ProcessDeviceArrival(const std::wstring& devicePath)
+{
         std::wcout
             << L"\n========================================\n"
             << L"  USB DEVICE CONNECTED\n"
@@ -540,7 +609,15 @@ LRESULT USBMonitor::HandleDeviceChange(WPARAM wParam, LPARAM lParam)
                        << L" — Reason: " << LocalDatabase::ToWide(result.reason) << L"\n";
 
             if (result.decision == AccessDecision::ASK) {
-                std::wcout << L"[ACTION REQUIRED] Allow this device? (y/n): ";
+                if (!m_pAccessController->IsInteractivePromptsEnabled()) {
+                    std::wcout << L"[ACCESS CONTROLLER] Service mode: ASK converted to BLOCK - no interactive console available.\n\n";
+                    if (m_pLogger) {
+                        SecurityEvent ev = m_pLogger->BuildEvent(
+                            EventType::DEVICE_BLOCKED, device, "BLOCK", "SERVICE_NO_INTERACTIVE_CONSOLE");
+                        m_pLogger->Log(ev);
+                    }
+                } else {
+                    std::wcout << L"[ACTION REQUIRED] Allow this device? (y/n): ";
                 std::wcout.flush();
                 std::wstring answer;
                 std::wcin >> answer;
@@ -556,6 +633,7 @@ LRESULT USBMonitor::HandleDeviceChange(WPARAM wParam, LPARAM lParam)
                         device, AccessDecisionToString(userResult.decision), userResult.reason);
                     m_pLogger->Log(ev);
                 }
+                }
             } else {
                 std::wcout << (result.decision == AccessDecision::ALLOW
                     ? L"[ACCESS CONTROLLER] Device is ALLOWED and active.\n\n"
@@ -568,6 +646,12 @@ LRESULT USBMonitor::HandleDeviceChange(WPARAM wParam, LPARAM lParam)
                         device, AccessDecisionToString(result.decision), result.reason);
                     m_pLogger->Log(ev);
                 }
+            }
+            if (m_pLogger && result.decision == AccessDecision::ASK &&
+                m_pAccessController->IsInteractivePromptsEnabled()) {
+                SecurityEvent ev = m_pLogger->BuildEvent(
+                    EventType::UNKNOWN_DEVICE, device, "ASK", result.reason);
+                m_pLogger->Log(ev);
             }
         } else if (m_pDb) {
             bool allowed = m_pDb->IsDeviceAllowed(device);
@@ -586,10 +670,10 @@ LRESULT USBMonitor::HandleDeviceChange(WPARAM wParam, LPARAM lParam)
                 EventType::DEVICE_CONNECTED, device, "-", "device_arrival");
             m_pLogger->Log(ev);
         }
-    }
-    // ── DBT_DEVICEREMOVECOMPLETE ─────────────────────────────────────────
-    else if (wParam == DBT_DEVICEREMOVECOMPLETE)
-    {
+}
+
+void USBMonitor::ProcessDeviceRemoval(const std::wstring& devicePath)
+{
         std::wcout
             << L"\n========================================\n"
             << L"  USB DEVICE REMOVED\n";
@@ -609,22 +693,18 @@ LRESULT USBMonitor::HandleDeviceChange(WPARAM wParam, LPARAM lParam)
             << L"  Device Interface: " << devicePath << L"\n"
             << L"========================================\n\n";
 
-        if (m_pDb) {
-            USBDevice dev;
-            dev.devicePath = devicePath;
-            dev.vid = vid;
-            dev.pid = pid;
-            dev.serialNumber = serial;
+        USBDevice dev = DeviceInfoExtractor::Extract(devicePath);
+        dev.devicePath = devicePath;
+        dev.vid = vid;
+        dev.pid = pid;
+        dev.serialNumber = serial;
+        DeviceClassifier::Classify(dev);
+
+        if (m_pDb)
             m_pDb->LogEvent("DISCONNECTED", dev, "INFO", "Device removed");
-        }
         // Phase 1F: Log removal event
         if (m_pLogger) {
-            USBDevice dev;
-            dev.vid = vid; dev.pid = pid; dev.serialNumber = serial;
             SecurityEvent ev = m_pLogger->BuildEvent(EventType::DEVICE_REMOVED, dev, "-", "device_removal");
             m_pLogger->Log(ev);
         }
-    }
-
-    return TRUE;
 }

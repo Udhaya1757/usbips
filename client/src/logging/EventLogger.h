@@ -63,7 +63,9 @@ public:
     EventLogger(const EventLogger&) = delete;
     EventLogger& operator=(const EventLogger&) = delete;
 
-    bool Initialize(LocalDatabase* db, const std::string& logFilePath = "usbips_events.log");
+    bool Initialize(LocalDatabase* db,
+                    const std::string& logFilePath = "usbips_events.log",
+                    const std::string& clientConfigPath = "usbips_client.conf");
     void Close();
 
     // Write a SecurityEvent to the log file and the database

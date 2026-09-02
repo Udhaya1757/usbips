@@ -66,8 +66,8 @@ bool LocalDatabase::Initialize(const std::string& dbPath) {
     );
 
     if (rc != SQLITE_OK) {
-        std::cerr << "[LocalDatabase] Failed to open SQLite DB: "
-                  << (m_db ? sqlite3_errmsg(m_db) : "Unknown error") << std::endl;
+        std::wcerr << L"[LocalDatabase] Failed to open SQLite DB: "
+               << ToWide(m_db ? sqlite3_errmsg(m_db) : "Unknown error") << std::endl;
         if (m_db) {
             sqlite3_close(m_db);
             m_db = nullptr;
@@ -123,8 +123,8 @@ bool LocalDatabase::CreateTables() {
     char* errMsg = nullptr;
     int rc = sqlite3_exec(m_db, schema, nullptr, nullptr, &errMsg);
     if (rc != SQLITE_OK) {
-        std::cerr << "[LocalDatabase] Table creation error: "
-                  << (errMsg ? errMsg : sqlite3_errmsg(m_db)) << std::endl;
+        std::wcerr << L"[LocalDatabase] Table creation error: "
+               << ToWide(errMsg ? errMsg : sqlite3_errmsg(m_db)) << std::endl;
         if (errMsg) sqlite3_free(errMsg);
         return false;
     }
@@ -154,7 +154,8 @@ bool LocalDatabase::IsDeviceAllowed(const USBDevice& device) {
     sqlite3_stmt* stmt = nullptr;
     int rc = sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr);
     if (rc != SQLITE_OK) {
-        std::cerr << "[LocalDatabase] Query prepare error: " << sqlite3_errmsg(m_db) << std::endl;
+        std::wcerr << L"[LocalDatabase] Query prepare error: "
+               << ToWide(sqlite3_errmsg(m_db)) << std::endl;
         return false;
     }
 

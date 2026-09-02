@@ -24,15 +24,18 @@ EventLogger::~EventLogger() {
     Close();
 }
 
-bool EventLogger::Initialize(LocalDatabase* db, const std::string& logFilePath) {
+bool EventLogger::Initialize(LocalDatabase* db,
+                             const std::string& logFilePath,
+                             const std::string& clientConfigPath) {
     std::lock_guard<std::mutex> lock(m_mutex);
 
     m_db = db;
-    m_clientId = LoadOrCreateClientId();
+    m_clientId = LoadOrCreateClientId(clientConfigPath);
 
     m_logFile.open(logFilePath, std::ios::app);
     if (!m_logFile.is_open()) {
-        std::cerr << "[EventLogger] Failed to open log file: " << logFilePath << "\n";
+        std::wcerr << L"[EventLogger] Failed to open log file: "
+               << LocalDatabase::ToWide(logFilePath) << L"\n";
         return false;
     }
 
@@ -171,7 +174,7 @@ void EventLogger::Log(SecurityEvent& event) {
     }
 
     // 2. Print to console
-    std::cout << "[LOG] " << line.str() << "\n";
+    std::wcout << L"[LOG] " << LocalDatabase::ToWide(line.str()) << L"\n";
 
     // 3. Write to SQLite events table
     if (m_db) {

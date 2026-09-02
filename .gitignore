@@ -59,3 +59,45 @@ Thumbs.db
 .vscode/
 *.swp
 *~
+
+# Build artifacts
+client/*.exe
+client/*.dll
+client/*.obj
+client/*.pdb
+client/*.ilk
+client/*.lib
+client/*.exp
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# SQLite databases and temporary files
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# Runtime configuration and logs
+*.conf
+*.log
+.env
+.env.*
+
+# IDE
+.vscode/
+.idea/
+
+# Windows
+Thumbs.db
+Desktop.ini
+
+# Temporary files
+*.tmp
+*.temp
+*.bak

@@ -40,16 +40,25 @@ struct DecisionResult {
     std::string reason;
 };
 
+class ServerClient;
+
 class AccessController {
 public:
-    explicit AccessController(LocalDatabase* db);
+    explicit AccessController(LocalDatabase* db, ServerClient* serverClient = nullptr);
 
     DecisionResult EvaluateDevice(USBDevice& device);
     DecisionResult HandleUserDecision(USBDevice& device, bool userApproved, const std::string& friendlyName = "");
+    void SetInteractivePrompts(bool enabled) { m_interactivePrompts = enabled; }
+    bool IsInteractivePromptsEnabled() const { return m_interactivePrompts; }
 
     void SetDatabase(LocalDatabase* db) { m_db = db; }
     LocalDatabase* GetDatabase() const { return m_db; }
 
+    void SetServerClient(ServerClient* serverClient) { m_serverClient = serverClient; }
+    ServerClient* GetServerClient() const { return m_serverClient; }
+
 private:
     LocalDatabase* m_db;
+    ServerClient* m_serverClient;
+    bool m_interactivePrompts = true;
 };
